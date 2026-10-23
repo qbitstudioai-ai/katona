@@ -113,7 +113,13 @@
 
 **Новый отчёт об установке (пользователь, только чтение):** n8n **2.41.0**, на сервере Docker-контейнеры `n8n` с образом `n8nio/n8n:2.41.0` и `n8n-postgres` с образом `postgres:17-alpine`. Системной службы `n8n` и локального бинарника `n8n` на хосте нет. Это **подтверждает Docker**, но сам по себе вывод не подтверждает использование Docker Compose.
 
-**Следующий read-only осмотр:** `docker inspect n8n` с выводом **только заранее выбранных несекретных** переменных истории и бинарного хранения; значения путей маскируются. Никаких изменений Workflow Settings, Docker, SQL или тестовых исполнений.
+**Фактический Docker Compose / переменные среды:** пользователь выполнил `docker inspect n8n`: запуск **Docker Compose** подтверждён лейблом. Для всех 15 проверенных параметров (`EXECUTIONS_MODE`, таймауты, сохранение success/error/manual/progress, prune, age, max count, delete buffer, execution/binary mode и пути) получено **«не задано»**. Это значит, что явных override этих имён в `.Config.Env` нет; фактическое наличие исторических данных этим запросом **не проверяется**. Пароли/пути в вывод не попали.
+
+**Значения из официальной текущей документации n8n (проверить совместимость с 2.41.0 при необходимости):** `EXECUTIONS_MODE=regular`, `EXECUTIONS_DATA_SAVE_ON_SUCCESS=all`, `EXECUTIONS_DATA_SAVE_ON_ERROR=all`, `EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true`, `EXECUTIONS_DATA_SAVE_ON_PROGRESS=false`, `EXECUTIONS_TIMEOUT=-1`, `N8N_EXECUTION_DATA_STORAGE_MODE=database`, `EXECUTIONS_DATA_PRUNE=true`, `EXECUTIONS_DATA_MAX_AGE=336 часов`, `EXECUTIONS_DATA_PRUNE_MAX_COUNT=10000`, `N8N_DEFAULT_BINARY_DATA_MODE=default` (бинарные файлы в памяти). Источники: [Executions](https://docs.n8n.io/deploy/host-n8n/configure-n8n/basic-configuration/use-environment-variables/executions.md), [Binary data](https://docs.n8n.io/deploy/host-n8n/configure-n8n/basic-configuration/use-environment-variables/binary-data.md), [Data pruning](https://docs.n8n.io/deploy/host-n8n/configure-n8n/scaling/manage-execution-data.md).
+
+**Риск:** сохранённая история содержит output Code-узла `kb01a_base64` независимо от режима хранения binary. По документации очистка касается **завершённых** execution, а `new/running/waiting` и аннотированные executions не подлежат обычной очистке. Это не гарантия физического удаления из PostgreSQL backups и журналов.
+
+**Следующий read-only осмотр:** Docker mount destinations без источников, наличие и совокупный размер каталогов `binaryData`/`storage` в контейнере; не читать файлы, не присылать outputs. После — проверить политику резервных копий и составить безопасный план устранения риска. Никаких изменений Workflow Settings, Docker, SQL или тестовых исполнений.
 
 ## 4. Критерии завершения B2
 
