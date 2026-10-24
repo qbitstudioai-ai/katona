@@ -85,3 +85,7 @@ CSV экспорта 55 строк четырёх таблиц: 5 докумен
 
 ## B3.5 — SQL prepare установлен (по отчёту 24.10.2026)
 Пользователь выполнил `CREATE OR REPLACE FUNCTION kb_v2_podgotovit(uuid,text,text,text,text,text,uuid)` + REVOKE, получил `Success. No rows returned`. Функция ещё не проверена вызовом, открывать EXECUTE и новую KB-ветку нельзя. Далее SELECT-only проверка прав/наличия/числа попыток, после этого подготовка защищённых функций для записи фрагментов, вопросов, проверок, публикации и cleanup. Старые TEST-файлы не удалять.
+
+
+## B3.5 — prepare verified, fragment function next
+Проверка пользователя: `kb_v2_podgotovit` существует, SECURITY DEFINER=true, EXECUTE service/bot/PUBLIC=false, v2 попыток 0. Следующее — `kb_v2_sohranit_fragmenty(jsonb)` с обязательными UUID попытки/версии/lease-token, номером владения=1, блокировками попытки/документа/версии, batch 1..100, vectors(1024), SHA256 и rollback при любом конфликте. Установку нельзя считать рабочим тестом; n8n off, старый Schedule Trigger disabled.
