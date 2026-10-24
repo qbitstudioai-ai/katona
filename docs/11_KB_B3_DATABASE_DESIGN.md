@@ -173,3 +173,10 @@ SQL публикуется **только в чате**, не здесь. Шаг
 Пользователь получил `Success. No rows returned` после `CREATE OR REPLACE FUNCTION katona.kb_v2_nachat(uuid)` с блокировкой попытки/документа/версии, проверкой `dokument_id` и `versiya_id`, сравнением active pointer и окончательным закрытием конфликтной попытки. `REVOKE` от PUBLIC и двух служебных ролей включён в транзакцию. Важно: PL/pgSQL может отложить проверку некоторых имён столбцов и условий до первого вызова. **Установка ≠ успешное выполнение.** Функции ещё не вызывались в закрытом тесте, публикация отсутствует.
 
 **Статический риск:** в новом коде есть `zagruzki_znaniy.status='obrabotka'`, `versii_dokumentov_znaniy.status='oshibka'`, `zagruzki_znaniy.kod_oshibki`/`opisanie_oshibki`. Их существование и разрешённые CHECK-статусы должны быть независимо подтверждены SELECT-only запросом, прежде чем готовить последующие SQL. Не вызывать `kb_v2_nachat` на живых строках. Проверить также эффективные EXECUTE и отсутствие новых попыток. После проверки подготовить функцию создания версии, которая не затронет опубликованную активную версию.
+
+
+## B3.5 — CHECK статусов и подготовка следующего шага (24.10.2026)
+
+Пользователь прислал 11 CHECK-ограничений двух таблиц. Подтверждены допустимые статусы загрузок: `poluchena`, `proverka`, `obrabotka`, `ozhidaet_proverki`, `zavershena`, `dublikat`, `oshibka`; статусы версий: `chernovik`, `gotova`, `opublikovana`, `arhiv`, `oshibka`. Размер загрузки 0..5242880, SHA-256 в lowercase hex, у версий название непустое, номер >0, тип документа один из `opisanie`, `harakteristiki`, `instrukciya`, `faq`, `usloviya`, `politika`.
+
+Следующий SELECT-only шаг: точный перечень колонок/NOT NULL/default в `dokumenty_znaniy`, `versii_dokumentov_znaniy`, `zagruzki_znaniy`, `profili_indeksa`. Это нужно для безопасного `INSERT` draft без вымышленных полей, обхода CHECK и редактирования опубликованного active pointer. Никаких INSERT/UPDATE/запуска пользовательских SQL-функций на этом шаге.
