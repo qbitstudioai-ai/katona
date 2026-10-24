@@ -109,3 +109,7 @@ User SELECT: `kb_v2_sohranit_fragmenty(jsonb)` exists, SECURITY DEFINER=true, se
 
 ## B3.5 — все десять функций установлены и права закрыты
 Отчёт пользователя из десяти строк: все функции есть, SECURITY DEFINER=true, service/client/PUBLIC EXECUTE=false, попыток 0. Smoke NULL прошёл в одной транзакции. Это ещё НЕ рабочий тест: PL/pgSQL проверяет некоторые имена полей и типы только при вызове ветки. Далее одним SELECT-only аудитом сверить фактические поля/типы и pgcrypto/vector. Потом закрытый BEGIN/ROLLBACK тест без Telegram, при необходимости скорректировать функции, лишь после этого решать о доступах и B4 JSON. Workflow и старый расписанный worker не включать.
+
+
+## B3.5 — структурный аудит 75 полей успешен
+CSV пользователя: проверено 75 столбцов, отсутствует 0; вектора 1024, uuid[]/numeric[] для checks, pgcrypto digest и vector доступны, 0 v2 попыток. Далее один SELECT-only preflight event/profile CHECK и active DB triggers/external side effects, затем одна изолированная тестовая транзакция с ROLLBACK. Не считать ROLLBACK отменой внешних вызовов триггеров, если они существуют; проверить до теста.
