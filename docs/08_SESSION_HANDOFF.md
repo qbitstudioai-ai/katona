@@ -101,3 +101,7 @@ User SELECT: `kb_v2_sohranit_fragmenty(jsonb)` exists, SECURITY DEFINER=true, se
 
 ## B3.5 — ускорение по запросу пользователя
 Пользователь сообщил `Success. No rows returned` после SQL `kb_v2_sohranit_voprosy(jsonb)`, попросил группировать задачи. Следующий пакет одним SQL: preflight question writer/0 attempts; создание guarded check writer, publish и failure/cleanup; финальный SELECT прав/наличия. Все new EXECUTE для n8n закрыты, ни одна функция не вызывается. Дальше expiry unknown, runtime тесты, B4 n8n исправления. SQL/секреты в публичный репозиторий не публиковать.
+
+
+## B3.5 — восемь функций подтверждены одним отчётом
+Пользователь прислал 8 строк: все `sozdana/protected=true`, service/client/PUBLIC EXECUTE=false, попыток 0. Это только проверка DDL/прав, а не успешной обработки. Следующий ускоренный пакет — защищённые отмена и закрытие просрочки без повторов, единый smoke на NULL и аудит прав. Никаких новых загрузок или включений старого Schedule Trigger.
