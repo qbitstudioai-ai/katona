@@ -89,3 +89,7 @@ CSV экспорта 55 строк четырёх таблиц: 5 докумен
 
 ## B3.5 — prepare verified, fragment function next
 Проверка пользователя: `kb_v2_podgotovit` существует, SECURITY DEFINER=true, EXECUTE service/bot/PUBLIC=false, v2 попыток 0. Следующее — `kb_v2_sohranit_fragmenty(jsonb)` с обязательными UUID попытки/версии/lease-token, номером владения=1, блокировками попытки/документа/версии, batch 1..100, vectors(1024), SHA256 и rollback при любом конфликте. Установку нельзя считать рабочим тестом; n8n off, старый Schedule Trigger disabled.
+
+
+## B3.5 — фрагменты установлены, права проверить
+Пользователь выполнил SQL `CREATE OR REPLACE FUNCTION kb_v2_sohranit_fragmenty(jsonb)` с REVOKE, получил `Success. No rows returned`. Это DDL-успех, не runtime-проверка. Немедленно сделать SELECT-only проверку SECURITY DEFINER/EXECUTE service/client/PUBLIC и числа v2 попыток. Никакого вызова функции или новых загрузок до завершения B3. Следующий функциональный блок — вопросы.
