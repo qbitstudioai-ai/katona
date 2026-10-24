@@ -133,3 +133,7 @@ Registration, prepare, corrected claim прошли. Fragment INSERT SQLSTATE 42
 
 ## B3.5 — патч фрагментов проверен
 SELECT пользователя: `ispravleno=true`, `zashchita_ot_dubley=true`, service_execute=false, bot_execute=false, `popytok=0`. Повторить исходный полный тест BEGIN/ROLLBACK, без прав n8n. Предыдущий тест не подтвердил вставку фрагментов и последующие шаги.
+
+
+## B3.5 — happy path test PASSED
+Пользователь получил `TEST_DONE_ROLLED_BACK`, 0 v2 попыток, 0 test docs после полного positive pipeline с публикацией, векторами 1024, вопросами/checks и duplicate-claim refusal. Это не доказательство защитных веток и одновременной конкуренции. Следующий объединённый BEGIN/ROLLBACK тест: 1) cancel pending 2) expiry running (single no-retry cleanup) 3) failure running. После него B4 переписывание служебной KB-ветки без raw Telegram payload/base64 в исполнениях.
