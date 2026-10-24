@@ -97,3 +97,7 @@ CSV экспорта 55 строк четырёх таблиц: 5 докумен
 
 ## B3.5 — фрагменты подтверждены, следующий блок вопросы
 User SELECT: `kb_v2_sohranit_fragmenty(jsonb)` exists, SECURITY DEFINER=true, service/bot/PUBLIC EXECUTE=false, 0 попыток. Готовится `kb_v2_sohranit_voprosy(jsonb)` с 3..10 вопросами, проверкой lease, владельца, draft и upload, без удаления/повторной записи. Устанавливать только без выдачи прав n8n; никаких новых KB-загрузок до закрытого runtime-теста.
+
+
+## B3.5 — ускорение по запросу пользователя
+Пользователь сообщил `Success. No rows returned` после SQL `kb_v2_sohranit_voprosy(jsonb)`, попросил группировать задачи. Следующий пакет одним SQL: preflight question writer/0 attempts; создание guarded check writer, publish и failure/cleanup; финальный SELECT прав/наличия. Все new EXECUTE для n8n закрыты, ни одна функция не вызывается. Дальше expiry unknown, runtime тесты, B4 n8n исправления. SQL/секреты в публичный репозиторий не публиковать.
