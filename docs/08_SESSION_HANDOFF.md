@@ -166,3 +166,10 @@ SELECT пользователя: `ispravleno=true`, `zashchita_ot_dubley=true`, 
 CSV пользователя №4: 11 SQL definitions; все девять v2 SQL существуют с `service_execute=false`; legacy bridge вопросов несовместим с v2, вместо него контрольные проверки записываются через `nomer_voprosa`. Составлен приватный 111-узловой JSON `Katona_Service_B4_V2_FULL_DRAFT_INACTIVE.json` с сохранёнными менеджерскими маршрутами, без авто-retry знаний, с одним atomic publish и закрытием отрицательных исходов. Статически проверены связи, 33 JS ноды и пять локальных сценариев. Живые n8n, БД и OpenAI не вызывались.
 
 Безопасные блокировки: `active=false`, в служебной конфигурации `kb.vklyuchena=false`, во внутреннем KB конфиге `pozvolit_v2_sql=false` и `profil_indeksa_id=''`. Перед запуском получить read-only профиль 1024 и согласовать интеграционные проверки; отдельно проверить Credentials, путь binary в n8n, настройку execution retention, доставку audit outbox, неизвестный publish и конкурентные кейсы. Старые SQL и реальные Credential refs не публиковать в GitHub. Ни права SQL, ни живые Workflow не изменялись.
+
+
+## B4 — результат SELECT профиля, CSV №5 (24.10.2026)
+
+SELECT пользователя вернул ровно один профиль `text-embedding-3-large`, `vector(1024)`, `cosine`, `cl100k_base`, max=800, parser/chunking совпадают, fingerprint `917b7768…ec3c`. К профилю привязана одна версия (состояние не проверялось). Приватный JSON `Katona_Service_B4_V2_PROFILE_VERIFIED_INACTIVE.json`: UUID указан в конфигурации, всё остальное от прежней 111-узловой версии сохранено. `active=false`, `kb.vklyuchena=false`, `pozvolit_v2_sql=false` не менять. Повторная статика и 5 локальных сценариев прошли, не было живого workflow исполнения/изменений прав или Supabase.
+
+Следующее действие — проверка 5 групп Credentials и сохранения history в отдельном отключённом черновике n8n. Реальные значения токенов в GitHub не публиковать. База знаний и Служебный Workflow не активируются до полного закрытого теста. Риски: закрытые права service для девяти v2-функций; публикация при неизвестном исходе требует ручной сверки, внешние backups/retention не подтверждены.
