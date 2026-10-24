@@ -123,3 +123,10 @@ Credential refs перенесены из свежего экспорта без
 Результат пользователя `getWebhookInfo`: `url=https://n8n.qbit-product.ru/webhook/katona-test-service-telegram-v1`, `pending_update_count=0`, `last_error_message` **начинается** с `Wrong response from the web...`, полный текст обрезан PowerShell. Значение `last_error_date` не получено. Совпадение пути с B4 JSON установлено, но B4 выключен, поэтому Telegram может попадать в старую активную версию либо получать ошибку несуществующего/закрытого endpoint. Не утверждать, что B4 принимает сообщения, не менять setWebhook.
 
 Следующий шаг: распечатать `$r.result | Format-List url,pending_update_count,last_error_message,last_error_date` без секретов; затем проверить активность старого и нового служебного Workflow в n8n. Документ до разрешения нового однократного процесса **не отправлять**.
+
+
+## Telegram — полный 404 и его дата (24.10.2026)
+
+Из PowerShell пользователя: `last_error_message = Wrong response from the webhook: 404 Not Found`, `last_error_date = 1792722977` = **2026-10-23 05:36:17 Europe/Moscow**, `pending_update_count = 0`, URL `/webhook/katona-test-service-telegram-v1`. Ошибка относится к предыдущему дню; **не установлено, существует ли 404 на момент проверки**. B4 JSON содержит `POST` webhook на том же пути, с `Header Auth`, но сам B4 экспортирован неактивным. n8n регистрирует production URL для опубликованного Workflow (официальная Webhook node документация). До любых изменений пользователь проверит статусы старого и нового служебных Workflow в UI. Включение B4 запрещено из-за незавершённого безопасного v2 конвейера.
+
+Дополнительный риск: обычный Telegram доставляет webhook с заголовком `X-Telegram-Bot-Api-Secret-Token` только при настроенном `secret_token`; текущий `Header Auth` может требовать иной заголовок. Перед тестовой отправкой сообщений нужно проверить их соответствие, не выводя значение токена.
