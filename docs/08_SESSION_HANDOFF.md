@@ -113,3 +113,7 @@ User SELECT: `kb_v2_sohranit_fragmenty(jsonb)` exists, SECURITY DEFINER=true, se
 
 ## B3.5 — структурный аудит 75 полей успешен
 CSV пользователя: проверено 75 столбцов, отсутствует 0; вектора 1024, uuid[]/numeric[] для checks, pgcrypto digest и vector доступны, 0 v2 попыток. Далее один SELECT-only preflight event/profile CHECK и active DB triggers/external side effects, затем одна изолированная тестовая транзакция с ROLLBACK. Не считать ROLLBACK отменой внешних вызовов триггеров, если они существуют; проверить до теста.
+
+
+## B3.5 — preflight перед тестом завершён
+Получен CSV с 21 обязательным без DEFAULT полем (11 profile, 10 event), 16 CHECK, 3 активными trigger, `possible_external_call=false` (только прямое regex-сканирование), 1 профилем 1024 и 0 v2-попыток. Следующий тест — BEGIN + synthetic event + registration/prepare/claim/fragments/questions/checks/publish + force deferred check + ROLLBACK + final read-only count. Не менять старые знания, n8n выключен. Учитывать, что ROLLBACK не откатывает IDENTITY sequence или не-транзакционные внешние действия.
