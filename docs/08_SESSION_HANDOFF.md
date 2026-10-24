@@ -61,3 +61,7 @@
 
 ## B3.5 — фактический путь регистрации в служебном Workflow
 Из GitHub JSON 108 nodes проверено: `tip_sobytiya='dokument_kb'`, Telegram `payload_ishodnyy` целиком равен raw update, а legacy KB скачивает binary, формирует `kb01a_base64` и передаёт decode в старую регистрирующую функцию. B4 требуется обязательный фильтр payload и полный отказ от base64 в сохраняемом output/SQL. В B3.5 проектируется новая `kb_v2_zaregistrirovat(uuid,bigint,text)`, которая читает безопасные метаданные уже зарегистрированного события, получает размер и sha256 без bytes, создаёт upload c `ishodnyy_fayl=NULL` и попытку v2, без старого job. До полного комплекта не давать EXECUTE новой функции service, ранее созданный claim не использовать. Дизайн добавлен в docs/11.
+
+
+## B3.5 — регистрация метаданных установлена по отчёту пользователя
+Получено `Success. No rows returned` после транзакции создания `kb_v2_zaregistrirovat(uuid,bigint,text)` с `ishodnyy_fayl=NULL`, `REVOKE EXECUTE` для `kb_v2_nachat` от service и login и без GRANT новой функции. Следующее — один SELECT-only контроль фактических EXECUTE на обе функции и числа попыток, далее SQL-проект prepare/claim. Нельзя считать цепочку готовой, включать Workflow/расписание и загружать новые документы.
