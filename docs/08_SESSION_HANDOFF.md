@@ -93,3 +93,7 @@ CSV экспорта 55 строк четырёх таблиц: 5 докумен
 
 ## B3.5 — фрагменты установлены, права проверить
 Пользователь выполнил SQL `CREATE OR REPLACE FUNCTION kb_v2_sohranit_fragmenty(jsonb)` с REVOKE, получил `Success. No rows returned`. Это DDL-успех, не runtime-проверка. Немедленно сделать SELECT-only проверку SECURITY DEFINER/EXECUTE service/client/PUBLIC и числа v2 попыток. Никакого вызова функции или новых загрузок до завершения B3. Следующий функциональный блок — вопросы.
+
+
+## B3.5 — фрагменты подтверждены, следующий блок вопросы
+User SELECT: `kb_v2_sohranit_fragmenty(jsonb)` exists, SECURITY DEFINER=true, service/bot/PUBLIC EXECUTE=false, 0 попыток. Готовится `kb_v2_sohranit_voprosy(jsonb)` с 3..10 вопросами, проверкой lease, владельца, draft и upload, без удаления/повторной записи. Устанавливать только без выдачи прав n8n; никаких новых KB-загрузок до закрытого runtime-теста.
