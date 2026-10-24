@@ -268,3 +268,8 @@ SELECT пользователя: `kb_v2_sohranit_fragmenty(jsonb)` сущест�
 ## B3.5 — интеграционный тест #2: конфликт имени в ON CONFLICT (24.10.2026)
 
 После исправленного claim тест прошёл регистрацию metadata-only, подготовку версии и однократный запуск. На сохранении вектора ошибка SQLSTATE 42702: `versiya_id` неоднозначно в `INSERT INTO fragmenty_znaniy ... ON CONFLICT (versiya_id, nomer_fragmenta)`, потому что `kb_v2_sohranit_fragmenty(jsonb)` имеет `RETURNS TABLE(versiya_id uuid,...)`. **Точечное решение:** убрать целевой список в `ON CONFLICT DO NOTHING` (оно покрывает конфликт уникального `(versiya_id,nomer_fragmenta)` и другие unique); оставить проверку `v_added IS NULL → RAISE EXCEPTION`, поэтому при конфликте транзакция не завершится успешно и не будет молчаливого пропуска. Проверить строго одно совпадение шаблона в `pg_get_functiondef` перед `CREATE OR REPLACE`, реальный EXECUTE оставить закрытым, убедиться что v2 очередь пуста, затем повторить тест с ROLLBACK. Не использовать общую настройку `variable_conflict=use_column`, она может скрывать другие ошибки.
+
+
+## B3.5 — подтверждение исправления ошибки 42702 в фрагментах (24.10.2026)
+
+После SQL-патча `kb_v2_sohranit_fragmenty(jsonb)` SELECT пользователя вернул: `ispravleno=true` (`ON CONFLICT DO NOTHING`), `zashchita_ot_dubley=true` (после пустого RETURNING бросается исключение), `service_execute=false`, `bot_execute=false`, `popytok=0`. Это подтверждает успешную замену кода, но **не** выполнение операции вставки. Пакет с тестовой транзакцией нужно полностью повторить, так как предыдущая остановилась до первого INSERT-фрагмента и откатилась. Следом — сценарии отмены/истечения и проверка повторной публикации. SQL прав не выдавать, пользовательских данных не добавлять.
