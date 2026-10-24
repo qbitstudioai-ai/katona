@@ -117,3 +117,7 @@ CSV пользователя: проверено 75 столбцов, отсут
 
 ## B3.5 — preflight перед тестом завершён
 Получен CSV с 21 обязательным без DEFAULT полем (11 profile, 10 event), 16 CHECK, 3 активными trigger, `possible_external_call=false` (только прямое regex-сканирование), 1 профилем 1024 и 0 v2-попыток. Следующий тест — BEGIN + synthetic event + registration/prepare/claim/fragments/questions/checks/publish + force deferred check + ROLLBACK + final read-only count. Не менять старые знания, n8n выключен. Учитывать, что ROLLBACK не откатывает IDENTITY sequence или не-транзакционные внешние действия.
+
+
+## B3.5 — ошибка теста 42702
+Синтетический тест прошёл registration+prepare, упал на `kb_v2_nachat` WHERE `nomer_vladeniya=0` — конфликт с OUT-параметром. Вероятно тестовый BEGIN не зафиксирован, выполнить ROLLBACK перед исправлением. Следующее — точечный патч функции и один read-only контроль, затем повтор сценария. Ни Runtime publish, ни отмена не подтверждены.
