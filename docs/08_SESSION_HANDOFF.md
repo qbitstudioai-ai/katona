@@ -65,3 +65,7 @@
 
 ## B3.5 — регистрация метаданных установлена по отчёту пользователя
 Получено `Success. No rows returned` после транзакции создания `kb_v2_zaregistrirovat(uuid,bigint,text)` с `ishodnyy_fayl=NULL`, `REVOKE EXECUTE` для `kb_v2_nachat` от service и login и без GRANT новой функции. Следующее — один SELECT-only контроль фактических EXECUTE на обе функции и числа попыток, далее SQL-проект prepare/claim. Нельзя считать цепочку готовой, включать Workflow/расписание и загружать новые документы.
+
+
+## B3.5 — исправленный claim установлен (отчёт пользователя)
+Пользователь исполнил CREATE OR REPLACE FUNCTION `katona.kb_v2_nachat(uuid)` c проверкой существования/связей черновика и документа, разовой арендой и REVOKE; Supabase вернул `Success. No rows returned`. Не считать runtime-верификацией. Перед подготовкой версии — SELECT-only проверка статусов `obrabotka`, `oshibka`, столбцов и закрытых прав, без вызова функций. Далее подготовка/сохранение/публикация/очистка, Workflow пока off.
