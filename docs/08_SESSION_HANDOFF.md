@@ -129,3 +129,7 @@ CSV пользователя: проверено 75 столбцов, отсут
 
 ## B3.5 — тест №2 остановился на фрагментах
 Registration, prepare, corrected claim прошли. Fragment INSERT SQLSTATE 42702: `ON CONFLICT (versiya_id, nomer_fragmenta)` collides with OUT variable `versiya_id`. Исправить ровно один фрагмент определения на `ON CONFLICT DO NOTHING`, оставить `RETURNING id` и `IF no id THEN RAISE`; rollback failed test, проверить closed EXECUTE и 0 попыток. Потом повторить тот же тест целиком.
+
+
+## B3.5 — патч фрагментов проверен
+SELECT пользователя: `ispravleno=true`, `zashchita_ot_dubley=true`, service_execute=false, bot_execute=false, `popytok=0`. Повторить исходный полный тест BEGIN/ROLLBACK, без прав n8n. Предыдущий тест не подтвердил вставку фрагментов и последующие шаги.
