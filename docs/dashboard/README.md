@@ -32,6 +32,7 @@
 - [02_UX_AND_FILTERS.md](02_UX_AND_FILTERS.md) — макет, UX, визуализация, фильтрация и состояния.
 - [03_IMPLEMENTATION_PLAN.md](03_IMPLEMENTATION_PLAN.md) — архитектура, безопасность, этапы и условия приёмки.
 - [04_VSCODE_HANDOFF.md](04_VSCODE_HANDOFF.md) — первый готовый промпт VSCode, формат отчёта и правила передачи задач.
+- [DATA_AUDIT.md](DATA_AUDIT.md) — результат аудита D0: подтверждённые источники, формулы 4 KPI, оставшиеся проверки, SELECT-only SQL.
 
 ## Разделение ответственности
 

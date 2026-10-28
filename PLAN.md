@@ -23,7 +23,9 @@
 - ✅ **DASH-DOC-01:** подготовлена проектная документация: [`docs/dashboard/README.md`](docs/dashboard/README.md), [метрики и Supabase](docs/dashboard/01_METRICS_AND_DATA.md), [UX и фильтры](docs/dashboard/02_UX_AND_FILTERS.md), [архитектура и этапы](docs/dashboard/03_IMPLEMENTATION_PLAN.md), [первое задание VSCode](docs/dashboard/04_VSCODE_HANDOFF.md).
 - ✅ MVP-границы утверждены как **предложение к проверке данными**: 4 KPI — новые обращения, достигли цели, конверсия, потеряны; один график динамики, одна воронка по подтверждённой истории этапов (иначе распределение текущих этапов), компактная таблица последних диалогов. Фильтры: период, канал при 2+ каналах; статус только для таблицы. **Не включать** себестоимость диалога, финансовые KPI или расходы LLM.
 - ⚠️ Наличие исторически зафиксированных `katona_dashboard_read` (NOLOGIN) и `audit_dashboard_summary` **не доказывает**, что все необходимые метрики уже доступны. Никаких фиктивных столбцов и результатов.
-- 🔄 **DASH-D0-01:** аудит репозитория и Workflow выполнен — [`docs/dashboard/DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md). У VSCode нет read-only доступа к Supabase; ни один KPI пока не подтверждён до уровня «таблица → столбец → значение». Выявлено: этап `celevoe_deystvie` выбирает LLM-планировщик; `katona_dashboard_read` без LOGIN-участника; тело `audit_dashboard_summary` в репозитории отсутствует. **Следующий шаг:** пользователь запускает SELECT-only SQL-D0-1…7 из `DATA_AUDIT.md` и возвращает CSV; решение руководителя по признаку цели. Никакого frontend/backend до этого.
+- ✅ **DASH-D0-01:** аудит репозитория и Workflow, SELECT-only SQL-D0-1…7 — [`docs/dashboard/DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md).
+- ✅ **DASH-D0-02:** по read-only аудиту руководителя закреплены источники и формулы 4 KPI с единой когортой по `dialogi.vremya_nachala`: цель — `celevye_sobytiya` (`ostavit_zayavku`, `zayavki` производная), потеря — `dialogi.status='zavershen'` + `rezultat='net_otveta'`. `audit_dashboard_summary` — технические счётчики без периода, не продажный API. См. [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md) и [`01_METRICS_AND_DATA.md`](docs/dashboard/01_METRICS_AND_DATA.md).
+- 🔄 **D0 не завершён:** не подтверждены права доступа дашборда, имена ключей, уникальность целевых событий, полнота `sobytiya_etapov` по всем маршрутам (до этого — только распределение по текущим этапам) и правило исключения пилотных данных (`testovyy=false` у тестировщиков). Список проверок — §7 `DATA_AUDIT.md`. Никакого frontend/backend до закрытия D0.
 - ⬜ **DASH-D1:** после решения по D0 — безопасный read-only SQL/API контракт.
 - ⬜ **DASH-D2:** локальный отдельный web frontend в `dashboard/`; без изменений n8n.
 - ⬜ **DASH-D3:** сверка метрик и тестирование.
@@ -162,7 +164,7 @@
 
 ### 6. Дашборд — отдельный проектный блок DASH
 - ✅ Спецификация, метрики, UX, правила фильтрации, этапы D0–D4 и промпт VSCode — в [docs/dashboard/](docs/dashboard/README.md).
-- 🔄 D0 read-only аудит: репозиторий проверен, [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md) создан, ждём результаты SQL-D0-1…7; затем D1 контракт API, D2 frontend, D3 приёмка, D4 размещение.
+- 🔄 D0 read-only аудит: D0-01 и D0-02 выполнены, контракт 4 KPI закреплён в [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md); осталось закрыть проверки прав, ключей, этапов и пилотных данных. Затем D1 контракт API, D2 frontend, D3 приёмка, D4 размещение.
 - ⬜ Данные для каждого KPI и доступ роли `katona_dashboard_read` проверить до реализации; код и SQL пока не меняются.
 
 ## Кто что делает
