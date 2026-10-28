@@ -31,7 +31,7 @@
 | Прочие известные таблицы | `soobshcheniya` (уникальность `(dialog_id, vneshnee_soobshchenie_id)`), `ishodyashchie_deystviya`, `operator_telegram_temy`, `sobytiya_integraciy`, `audit_uvedomleniya`, таблицы базы знаний | ✅А |
 | Признак теста | У пользователей есть `testovyy`; у текущих пилотных тестировщиков он `false` | ✅Б |
 
-**Не подтверждены точные имена:** первичного ключа `dialogi` и ссылок на него из `celevye_sobytiya` / `zayavki` / `sobytiya_etapov`, столбцов канала, текущего этапа и владельца в `dialogi`, таблицы с `testovyy`, тип `dialogi.vremya_nachala` (ожидается `timestamptz NOT NULL`). Ниже ключ диалога обозначен как `dialog_id`.
+**По предоставленной выгрузке структуры:** `dialogi.id` — ключ диалога; `celevye_sobytiya.dialog_id`, `zayavki.dialog_id`, `sobytiya_etapov.dialog_id` — ссылки на диалог; `dialogi.vremya_nachala` — `timestamptz NOT NULL`. Полные FK/UNIQUE и права ещё не проверены. Текущий признак `polzovateli.testovyy` для ранее созданных тестовых обращений ненадёжен.
 
 ## 3. Подтверждённая SQL-логика (✅Б)
 
@@ -50,33 +50,36 @@
 - Когорта периода `C` = диалоги `dialogi` с `vremya_nachala` в полуинтервале `[from, to)`.
 - Пользователь выбирает даты в `Europe/Moscow` включительно; backend переводит их в `[from 00:00 MSK, (to + 1 день) 00:00 MSK)` и сравнивает с `timestamptz` без ручного сдвига часов.
 - Все четыре KPI считаются **по одной когорте**; цель и потеря оцениваются на момент запроса (`data_as_of`). Цифры прошлых периодов могут меняться, если диалог дошёл до цели или был закрыт позже, — UI это поясняет.
-- Пилотные данные исключаются правилом из `01_METRICS_AND_DATA.md` (пока не реализовано, см. §6).
+- Тестовые обращения в рабочей версии должны исключаться по достоверной классификации, без произвольного порога даты. Отдельного пилотного этапа нет. Правило пока не реализовано, см. `01_METRICS_AND_DATA.md`.
 
 ### Формулы
 
-Псевдо-SQL для фиксации смысла, **не для запуска**: имена ключей уточняются (§2).
+Псевдо-SQL для фиксации смысла, **не для запуска**: имена ключей подтверждены ранее выданной структурой, FK/уникальность и права ещё предстоит проверить.
 
 ```text
-C               = SELECT dialog_id FROM dialogi
+C               = SELECT id AS dialog_id FROM dialogi
                   WHERE vremya_nachala >= :from_ts AND vremya_nachala < :to_ts
-                    AND <правило исключения пилотных данных>
+                    AND <достоверное исключение тестовых/служебных обращений>
 
 new_dialogues   = COUNT(DISTINCT dialog_id) FROM C
 
 target_reached  = COUNT(DISTINCT c.dialog_id) FROM C c
                   WHERE EXISTS (SELECT 1 FROM celevye_sobytiya ce
                                 WHERE ce.dialog_id = c.dialog_id
-                                  AND ce.kod_celi = 'ostavit_zayavku')
+                                  AND ce.kod_celi = 'ostavit_zayavku'
+                                  AND ce.podtverzhdeno = true)
 
 conversion_pct  = ROUND(100.0 * target_reached / new_dialogues, 1);  при new_dialogues = 0 → «—»
 
-lost_dialogues  = COUNT(DISTINCT c.dialog_id) FROM C c JOIN dialogi d USING (dialog_id)
+lost_dialogues  = COUNT(DISTINCT d.id) FROM C c JOIN dialogi d ON d.id=c.dialog_id
                   WHERE d.status = 'zavershen' AND d.rezultat = 'net_otveta'
-                    AND NOT EXISTS (целевое событие ostavit_zayavku у этого диалога)
+
+anomaly_both    = число диалогов C, удовлетворяющих и lost_dialogues, и target_reached
+                  (контроль качества; не скрывать эти записи из KPI)
 ```
 
 - **Достигли цели** = наличие подтверждённого события в `celevye_sobytiya` с кодом цели компании `ostavit_zayavku` (из конфигурации `cel.kod`). Не этап из ответа LLM, не упоминание контакта и не строка `zayavki`.
-- **Потерянные** = только `rezultat='net_otveta'`. Другие итоговые значения (`zapret_iniciativy`, отказ и т.п.) потерей не считаются, пока руководитель не решит иначе. Исключение диалогов с целью — защитное: пересечение «цель и потеря» должно быть 0 и проверяется (§7).
+- **Потерянные** = текущие `status='zavershen'` и `rezultat='net_otveta'`. Отказ и другие причины не считаются потерей. Пересечение «цель и потеря» — диагностическая аномалия; не исключать его молча из числа потерь.
 - **Динамика:** `new_dialogues` по локальной дате `vremya_nachala` (MSK), дни без обращений — 0. Вторая серия — `target_reached` той же дневной когорты.
 
 ### Остальные элементы
@@ -92,7 +95,7 @@ lost_dialogues  = COUNT(DISTINCT c.dialog_id) FROM C c JOIN dialogi d USING (dia
 
 | Метрика | Источник | Структура и логика | Права | Полнота данных |
 |---|---|---|---|---|
-| Новые обращения | `dialogi.vremya_nachala` | ✅Б | ❓ | ❓ пилотные данные не исключаются |
+| Новые обращения | `dialogi.vremya_nachala` | ✅Б | ❓ | ❓ тестовые обращения достоверно не классифицированы |
 | Достигли цели | `celevye_sobytiya.kod_celi='ostavit_zayavku'` | ✅Б | ❓ | ❓ |
 | Конверсия | Производная | ✅Б | ❓ | ❓ |
 | Потерянные | `dialogi.status='zavershen'` + `rezultat='net_otveta'` | ✅Б | ❓ | ❓ |
@@ -108,12 +111,12 @@ lost_dialogues  = COUNT(DISTINCT c.dialog_id) FROM C c JOIN dialogi d USING (dia
 ## 7. Оставшиеся проверки перед проектированием backend
 
 1. **Права:** результаты SQL-D0-1 и SQL-D0-2 — участники и LOGIN у `katona_dashboard_read`, доступ `anon`/`authenticated` к `katona`, владелец и `search_path` функций.
-2. **Ключи и типы:** имена PK `dialogi` и ссылок из `celevye_sobytiya`, `zayavki`, `sobytiya_etapov`; `vremya_nachala` — `timestamptz NOT NULL`; столбцы канала, текущего этапа и владельца (SQL-D0-4 по этим таблицам).
+2. **Ключи и типы:** `dialogi.id`, ссылки `dialog_id`, а также `vremya_nachala timestamptz NOT NULL` подтверждены предыдущей выгрузкой структуры. Осталось сверить FK/UNIQUE и права для безопасного API. SQL-D0-4 повторно не нужен.
 3. **Уникальность цели:** допускает ли `celevye_sobytiya` несколько событий одного кода на диалог; одна ли заявка на диалог; связана ли `zayavki` с `celevye_sobytiya` (SQL-D0-5).
 4. **Статусы:** все допустимые значения `dialogi.status` и `rezultat` (CHECK, SQL-D0-5); агрегатом проверить, что пересечение «цель и `net_otveta`» = 0.
 5. **Маршруты этапов:** пишет ли `sobytiya_etapov` начальный этап при создании диалога, `zaprosit_cheloveka` (`peredacha_cheloveku`), захват/возврат оператором, ручные сообщения менеджера, предупреждения/блокировку и закрытие потерей. Пока хоть один маршрут меняет этап без записи — только «Распределение по текущим этапам».
 6. **Согласие клиента:** откуда берётся текстовый признак согласия (сообщение клиента или поле ответа модели) и может ли модель выставить его сама.
-7. **Пилотные данные:** решение руководителя по правилу исключения (`01_METRICS_AND_DATA.md`).
+7. **Рабочая версия и тестовые обращения:** пользователь отменил отдельный пилот; проверить достоверную классификацию и исключение тестовых/служебных записей. Не отсекать по дате.
 8. **Ожидают менеджера:** точные значения этапа и владельца для «запрошено, не взято».
 9. **36-я таблица:** какая таблица добавлена после SQL №3 и нужна ли она дашборду.
 
@@ -284,7 +287,7 @@ SELECT a.table_name,
 
 - ✅ DASH-D0-01: репозиторий и Workflow изучены, SELECT-only SQL подготовлен.
 - ✅ DASH-D0-02: структура и SQL-логика 4 KPI закреплены; формулы и правило единой когорты по `dialogi.vremya_nachala` записаны как проект для утверждения.
-- ⬜ Проверки §7 — прежде всего права (7.1), ключи (7.2), уникальность цели (7.3) и правило пилотных данных (7.7).
+- ⬜ Проверки §7 — прежде всего права (7.1), ключи (7.2), уникальность цели (7.3) и правило классификации тестовых обращений (7.7).
 - ⬜ Воронка не подтверждена; до проверки маршрутов (7.5) — только распределение по текущим этапам.
 
 D1 не начат и не объявлен готовым.
