@@ -35,6 +35,7 @@
 - [03_IMPLEMENTATION_PLAN.md](03_IMPLEMENTATION_PLAN.md) — архитектура, безопасность, этапы и условия приёмки.
 - [04_VSCODE_HANDOFF.md](04_VSCODE_HANDOFF.md) — первый готовый промпт VSCode, формат отчёта и правила передачи задач.
 - [DATA_AUDIT.md](DATA_AUDIT.md) — результат аудита D0: подтверждённые источники, формулы 4 KPI, оставшиеся проверки, SELECT-only SQL.
+- [05_SQL_API_DESIGN.md](05_SQL_API_DESIGN.md) — проект D1: read-only SQL-функции, роли, контракт API, исключение тестовых обращений.
 
 ## Разделение ответственности
 
