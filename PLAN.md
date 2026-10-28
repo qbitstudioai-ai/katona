@@ -29,7 +29,8 @@
 - ⚠️ Наличие исторически зафиксированных `katona_dashboard_read` (NOLOGIN) и `audit_dashboard_summary` **не доказывает**, что все необходимые метрики уже доступны. Никаких фиктивных столбцов и результатов.
 - ✅ **DASH-D0-01:** аудит репозитория и Workflow, SELECT-only SQL-D0-1…7 — [`docs/dashboard/DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md).
 - ✅ **DASH-D0-02:** по read-only аудиту руководителя закреплены источники и формулы 4 KPI с единой когортой по `dialogi.vremya_nachala`: цель — `celevye_sobytiya` (`ostavit_zayavku`, `zayavki` производная), потеря — `dialogi.status='zavershen'` + `rezultat='net_otveta'`. `audit_dashboard_summary` — технические счётчики без периода, не продажный API. См. [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md) и [`01_METRICS_AND_DATA.md`](docs/dashboard/01_METRICS_AND_DATA.md).
-- 🔄 **D0 не завершён:** не подтверждены права доступа дашборда, имена ключей, уникальность целевых событий, полнота `sobytiya_etapov` по всем маршрутам (до этого — только распределение по текущим этапам) и достоверное исключение тестовых обращений (`testovyy=false` у тестировщиков; календарная граница запрещена как подмена классификации). Список проверок — §7 `DATA_AUDIT.md`. Никакого frontend/backend до закрытия D0.
+- ✅ **DASH-D0-03:** права подтверждены. `katona_dashboard_read` — NOLOGIN, только техническая `audit_dashboard_summary()`; `katona_dashboard_admin` содержит функции изменения данных; прямых прав на таблицы у дашборда нет. Подключения n8n для дашборда запрещены; 9 разрешений `kb_v2_*` служебного подключения не менять. Решение: backend требует **отдельного ограниченного серверного подключения и read-only API** — [`03_IMPLEMENTATION_PLAN.md`](docs/dashboard/03_IMPLEMENTATION_PLAN.md), раздел «Подключение backend к Supabase». Ключи `dialogi.id`/`dialog_id` подтверждены; цель — `podtverzhdeno=true`; пересечение «цель и потеря» показывается как аномалия.
+- 🔄 **D0 не завершён — блокируют backend:** (1) FK/UNIQUE `celevye_sobytiya`/`zayavki`/`sobytiya_etapov`, (2) полнота `sobytiya_etapov` по всем маршрутам (до этого — только распределение по текущим этапам), (3) достоверное исключение тестовых обращений (`testovyy=false` у тестировщиков; календарная граница запрещена). Проверки и SELECT-only SQL-D0-5/8/9 — §7–8 `DATA_AUDIT.md`. Никакого frontend/backend до закрытия D0.
 - ⬜ **DASH-D1:** после решения по D0 — безопасный read-only SQL/API контракт.
 - ⬜ **DASH-D2:** локальный отдельный web frontend в `dashboard/`; без изменений n8n.
 - ⬜ **DASH-D3:** сверка метрик и тестирование.
@@ -168,8 +169,8 @@
 
 ### 6. Дашборд — отдельный проектный блок DASH
 - ✅ Спецификация, метрики, UX, правила фильтрации, этапы D0–D4 и промпт VSCode — в [docs/dashboard/](docs/dashboard/README.md).
-- 🔄 D0 read-only аудит: D0-01 и D0-02 выполнены, контракт 4 KPI закреплён в [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md); осталось закрыть проверки прав, ключей, этапов и тестовых обращений. Затем D1 контракт API, D2 frontend, D3 приёмка, D4 размещение.
-- ⬜ Данные для каждого KPI и доступ роли `katona_dashboard_read` проверить до реализации; код и SQL пока не меняются.
+- 🔄 D0 read-only аудит: D0-01…03 выполнены, контракт 4 KPI и права закреплены в [`DATA_AUDIT.md`](docs/dashboard/DATA_AUDIT.md); осталось закрыть FK/UNIQUE, полноту истории этапов и исключение тестовых обращений. Затем D1 контракт API, D2 frontend, D3 приёмка, D4 размещение.
+- ✅ Источники 4 KPI и права `katona_dashboard_read` проверены (D0-02/03); для backend нужно отдельное подключение, его SQL готовится в D1 только с разрешения пользователя. Код и SQL пока не меняются.
 
 ## Кто что делает
 - **Руководитель (ChatGPT):** анализ, план, SQL, изменённые JSON, проверочные сценарии; обновляет статусы.
