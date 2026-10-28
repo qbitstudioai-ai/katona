@@ -1,472 +1,155 @@
-# DASH-D1-01R — проект SQL и API дашборда
+# DASH-D1-02A — SQL и API дашборда
 
-**Статус: исправленный проект (D1-01R) на проверку руководителя проекта. В Supabase ничего не выполнено.** Роли, функции и права ниже не существуют, пока пользователь отдельно не разрешит их создание (D1-02). Рабочая версия 1.0, без пилота и урезанного MVP. Результаты проверки во временном локальном PostgreSQL — §7.
+**Статус: окончательный SQL внедрения подготовлен (D1-02A) и передан руководителю проекта на утверждение. В Supabase ничего не выполнено.** Роли и функции не существуют, пока пользователь отдельно не разрешит внедрение. Рабочая версия 1.0, без пилота и урезанного MVP. Результаты проверки во временном локальном PostgreSQL 17.6 — §7.
+
+Исполняемые файлы — единственный источник SQL:
+
+- [`sql/dashboard_deploy.sql`](sql/dashboard_deploy.sql) — внедрение одной транзакцией со встроенными проверками;
+- [`sql/dashboard_rollback.sql`](sql/dashboard_rollback.sql) — откат только новых объектов.
 
 Основание: [`DATA_AUDIT.md`](DATA_AUDIT.md) (источники, права, проверки), [`01_METRICS_AND_DATA.md`](01_METRICS_AND_DATA.md) (определения), [`02_UX_AND_FILTERS.md`](02_UX_AND_FILTERS.md) (экран), [`03_IMPLEMENTATION_PLAN.md`](03_IMPLEMENTATION_PLAN.md) (архитектура подключения).
 
-## 1. Используемая структура (подтверждена аудитом руководителя)
+## 1. Подтверждённая среда и структура
+
+**Среда Supabase** (read-only запрос пользователя, 28.10.2026): PostgreSQL **17.6**; исполнитель `postgres` **не суперпользователь**; `katona_dashboard_read` уже имеет `USAGE` на `katona`; в `pg_default_acl` две записи для функций, их содержимое не раскрыто (§3.5); ролей `katona_dashboard_owner` и `katona_dashboard_api_login` нет.
 
 | Таблица | Столбцы, которые читает дашборд |
 |---|---|
 | `katona.dialogi` | `id uuid`, `polzovatel_id uuid`, `identifikator_kanala_id uuid`, `etap text`, `status text`, `rezultat`, `vremya_nachala timestamptz NOT NULL` |
 | `katona.identifikatory_kanalov` | `id uuid`, `kanal text` |
-| `katona.celevye_sobytiya` | `dialog_id`, `kod_celi`, `podtverzhdeno boolean` |
+| `katona.celevye_sobytiya` | `dialog_id uuid`, `kod_celi`, `podtverzhdeno boolean` |
 | `katona.polzovateli` | `id uuid`, `testovyy boolean`, `sluzhebnyy boolean` |
 
-- Канал диалога: `dialogi.identifikator_kanala_id → identifikatory_kanalov.id`, значение `identifikatory_kanalov.kanal`. Столбца `dialogi.kanal` нет.
+- Канал диалога: `dialogi.identifikator_kanala_id → identifikatory_kanalov.id`, значение `identifikatory_kanalov.kanal`.
 - Допустимые `dialogi.status` по CHECK: `aktivnyy`, `ozhidaet_otveta`, `peredan_cheloveku`, `zavershen`.
-- Тип `rezultat` и `kod_celi` в SQL приводится к `text`, поэтому проект от него не зависит.
-- Никакие другие столбцы этих таблиц дашборду не выдаются: внешние идентификаторы каналов (Telegram ID и т.п.), имена, телефоны и тексты недоступны даже роли-владельцу функций.
+- Тип `rezultat` и `kod_celi` в SQL приводится к `text`. Остальные имена и типы `dashboard_deploy.sql` проверяет **до** создания объектов (`dashboard_pre_columns`).
+- Никакие другие столбцы дашборду не выдаются: внешние идентификаторы каналов (Telegram ID и т.п.), имена, телефоны и тексты недоступны даже роли-владельцу функций.
 
-## 2. Состав объектов
+## 2. Состав объектов и изоляция
 
-| Объект | Тип | Кто вызывает | Назначение |
-|---|---|---|---|
-| `katona_dashboard_owner` | NOLOGIN-роль | — | Владелец функций дашборда; только `SELECT` по столбцам из §1 |
-| `katona_dashboard_api_login` | LOGIN-роль | сервер дашборда | Входит только в `katona_dashboard_read` |
-| `katona.dashboard_granicy(date, date)` | helper, INVOKER | функции дашборда | Проверка периода, границы суток в `Europe/Moscow` |
-| `katona.dashboard_kogorta(timestamptz, timestamptz)` | helper, INVOKER | функции дашборда | **Единственное** определение когорты, канала, цели, потери и исключения тестовых |
-| `katona.dashboard_obzor(date, date)` | DEFINER | `katona_dashboard_read` | 4 KPI, аномалия, число исключённых |
-| `katona.dashboard_dinamika(date, date)` | DEFINER | `katona_dashboard_read` | Новые обращения и цели по дням MSK |
-| `katona.dashboard_etapy(date, date)` | DEFINER | `katona_dashboard_read` | Распределение когорты по текущим этапам |
-| `katona.dashboard_poslednie(date, date, int, text, timestamptz, uuid)` | DEFINER | `katona_dashboard_read` | Страница последних обращений, keyset |
+| Объект | Тип | Права |
+|---|---|---|
+| `katona_dashboard_owner` | NOLOGIN | Владелец 6 функций; `USAGE` на `katona`; `SELECT` только на 15 столбцов из §1 |
+| `katona_dashboard_api_exec` | NOLOGIN | `USAGE` на `katona`; `EXECUTE` только на 4 функции API |
+| `katona_dashboard_api_login` | LOGIN | Состоит **только** в `katona_dashboard_api_exec`; read-only транзакции по умолчанию, таймауты, `CONNECTION LIMIT 5` |
+| `katona.dashboard_granicy(date, date)` | helper, INVOKER | Никому не выдан |
+| `katona.dashboard_kogorta(timestamptz, timestamptz)` | helper, INVOKER | Никому не выдан |
+| `katona.dashboard_obzor(date, date)` | API, DEFINER | `katona_dashboard_api_exec` |
+| `katona.dashboard_dinamika(date, date)` | API, DEFINER | `katona_dashboard_api_exec` |
+| `katona.dashboard_etapy(date, date)` | API, DEFINER | `katona_dashboard_api_exec` |
+| `katona.dashboard_poslednie(date, date, int, text, timestamptz, uuid)` | API, DEFINER | `katona_dashboard_api_exec` |
 
-Helpers объявлены `SECURITY INVOKER` и вызываются только из DEFINER-функций, то есть выполняются с правами `katona_dashboard_owner`. `katona_dashboard_read` и LOGIN-роль вызвать их напрямую не могут. Воронки (`sobytiya_etapov`) в контракте нет: полнота маршрутов истории не доказана (`DATA_AUDIT.md` §7).
+- **Существующая `katona_dashboard_read` не используется и не меняется.** LOGIN дашборда в неё не входит и поэтому не может выполнить техническую `audit_dashboard_summary()`; новые функции ей не выдаются. `katona_dashboard_admin`, роли n8n и разрешения `kb_v2_*` скрипт тоже не трогает.
+- Helpers объявлены `SECURITY INVOKER` и вызываются только из DEFINER-функций, то есть с правами `katona_dashboard_owner`.
+- Все KPI и виджеты берут данные из `dashboard_kogorta`, поэтому карточки, график и распределение не могут разойтись в определениях. Воронки (`sobytiya_etapov`) в контракте нет: полнота маршрутов истории не доказана (`DATA_AUDIT.md` §7).
 
-## 3. Проект SQL (не выполнять до ревью и разрешения пользователя)
+## 3. SQL
 
-Внедрение — **одна транзакция** (§3.1–§3.6): при любой ошибке, включая встроенные проверки в конце, не остаётся ни роли, ни функции, ни права. Пароль LOGIN-роли в скрипте отсутствует и задаётся отдельно (§3.6).
+### 3.1. Логика функций
 
-### 3.0. Перед внедрением (только SELECT)
+- **Период** (`dashboard_granicy`): даты включительные в `Europe/Moscow` → полуинтервал `[p_s 00:00 MSK, (p_po + 1) 00:00 MSK)`; максимум 366 дней; начало не в будущем. Ошибки — SQLSTATE `22023` с кодами `dashboard_period_invalid`, `dashboard_period_too_long`, `dashboard_period_in_future`. Результат не зависит от `TimeZone` сессии.
+- **Когорта** (`dashboard_kogorta`): одна строка на `dialogi.id`; `LEFT JOIN` к `identifikatory_kanalov` и `polzovateli` по первичным ключам, поэтому диалог без канала или пользователя не теряется.
+  - **Цель:** `EXISTS` по `celevye_sobytiya` с `kod_celi = 'ostavit_zayavku'` и `podtverzhdeno = true`; дубли событий не размножают строки.
+  - **Потеря:** `status = 'zavershen'` и `rezultat = 'net_otveta'`.
+  - **Исключение:** `testovyy` или `sluzhebnyy` у пользователя.
+- **`dashboard_obzor`:** все счётчики — `count(DISTINCT dialog_id)`. Конверсия `round(100 × цели / обращения, 1)`, при 0 обращений — `NULL`. Аномалия «цель + потеря» — отдельный счётчик; такие диалоги остаются в обоих KPI.
+- **`dashboard_dinamika`:** все дни периода по MSK, дни без обращений — 0.
+- **`dashboard_etapy`:** распределение когорты по `dialogi.etap`, не воронка.
+- **`dashboard_poslednie`:**
+  - сортировка `vremya_nachala DESC, id DESC`, keyset-курсор (`p_posle_vremya` и `p_posle_id` вместе);
+  - `LIMIT` в SQL ограничен 1–21: сервер запрашивает `limit + 1`, чтобы узнать о следующей странице;
+  - неизвестный `p_status` даёт пустую выборку, проверка списка — на сервере;
+  - `dialog_id` возвращается только серверу для курсора.
+- Все 6 функций — `STABLE`, `SET search_path = pg_catalog, pg_temp`, все объекты с префиксом `katona.`.
 
-```sql
-SELECT current_user                                                  AS ispolnitel,
-       (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)  AS superuser,
-       current_setting('server_version')                             AS versiya,
-       has_schema_privilege('katona_dashboard_read', 'katona', 'USAGE') AS read_usage_do,
-       (SELECT count(*) FROM pg_default_acl d
-         WHERE d.defaclobjtype = 'f'
-           AND (d.defaclnamespace = 0
-                OR d.defaclnamespace = 'katona'::regnamespace))       AS default_acl_funkciy,
-       (SELECT count(*) FROM pg_roles
-         WHERE rolname IN ('katona_dashboard_owner', 'katona_dashboard_api_login')) AS uzhe_est;
-```
+### 3.2. `dashboard_deploy.sql` — порядок шагов
 
-Ожидаем `uzhe_est = 0`. Значение `read_usage_do` записать: от него зависит откат (§3.8). `default_acl_funkciy > 0` не запрещает внедрение — лишние права всё равно отзываются и проверяются в §3.5–§3.6, — но стоит учесть.
+Одна транзакция `BEGIN … COMMIT`:
 
-### 3.1. Роль-владелец и минимальные права чтения
+1. **Предусловия** (иначе — исключение до создания чего-либо):
+   - PostgreSQL ≥ 17;
+   - трёх новых ролей и функций `katona.dashboard_*` ещё нет;
+   - 15 столбцов из §1 существуют с ожидаемыми типами;
+   - исполнитель владеет схемой `katona` и четырьмя таблицами (или имеет на них GRANT OPTION) и имеет `CREATE` на схеме — `dashboard_pre_ownership`. В Supabase это `postgres`, создавший схему SQL №3.
+2. **Роли:** `owner`, `api_exec`, `api_login` (`IN ROLE katona_dashboard_api_exec`), параметры `api_login`. Снимается членство с SET/INHERIT, которое PostgreSQL 17 выдаёт создателю при `createrole_self_grant`. `USAGE` на схему — `owner` и `api_exec`; `SELECT` по 15 столбцам — `owner`.
+3. **6 функций.**
+4. **ACL функций, пока владелец — исполнитель:** `REVOKE ALL … FROM PUBLIC`, `GRANT EXECUTE` на 4 функции API роли `api_exec`, затем цикл снимает права, выданные через default privileges (`anon`, `authenticated`, `service_role` и любые другие роли).
+5. **Смена владельца.** PostgreSQL 17 требует от исполнителя права `SET ROLE` на нового владельца, а от владельца — `CREATE` на схеме. Скрипт выдаёт `GRANT katona_dashboard_owner TO CURRENT_USER WITH INHERIT FALSE, SET TRUE` и `CREATE` на схему, выполняет `ALTER FUNCTION … OWNER TO`, затем снимает оба права. ACL переносится на нового владельца.
+6. **Встроенные проверки** (транзакция прерывается при любом нарушении):
+   - ровно 6 функций: владелец, `STABLE`, `search_path`, явный ACL; `SECURITY DEFINER` только у 4 API;
+   - ACL функций содержит только владельца и `api_exec` (EXECUTE без GRANT OPTION на 4 API);
+   - `api_login` может выполнить в `katona` **ровно 4** функции; отдельно проверено, что не может выполнить `audit_dashboard_summary()`;
+   - у `api_login` и `api_exec` нет прав ни на одну таблицу или столбец `katona` и нет `CREATE` на схеме;
+   - у владельца нет прав на уровне таблиц, `SELECT` ровно на 15 столбцов, нет прав на запись и `CREATE`;
+   - членство:
+     - `owner` и `api_exec` ни в чём не состоят;
+     - `api_login` состоит только в `api_exec` (с INHERIT, без ADMIN);
+     - кроме этого, в новых ролях допустим только исполнитель с автоматическим ADMIN OPTION PostgreSQL 17 без SET/INHERIT;
+   - атрибуты: `owner` и `api_exec` — NOLOGIN без привилегий; `api_login` — LOGIN, INHERIT, `CONNECTION LIMIT 5`, без SUPERUSER/CREATEROLE/CREATEDB/REPLICATION/BYPASSRLS; четыре параметра сессии заданы.
 
-```sql
-BEGIN;
+Существующие роли и права в скрипте не встречаются, кроме чтения каталога для проверок.
 
-CREATE ROLE katona_dashboard_owner NOLOGIN NOINHERIT;
+### 3.3. `dashboard_rollback.sql`
 
-GRANT USAGE ON SCHEMA katona TO katona_dashboard_owner;
-GRANT SELECT (id, polzovatel_id, identifikator_kanala_id, etap, status, rezultat, vremya_nachala)
-   ON katona.dialogi TO katona_dashboard_owner;
-GRANT SELECT (id, kanal)
-   ON katona.identifikatory_kanalov TO katona_dashboard_owner;
-GRANT SELECT (dialog_id, kod_celi, podtverzhdeno)
-   ON katona.celevye_sobytiya TO katona_dashboard_owner;
-GRANT SELECT (id, testovyy, sluzhebnyy)
-   ON katona.polzovateli TO katona_dashboard_owner;
-```
+Временно выдаёт исполнителю права роли-владельца — нужно, если исполнитель не владеет схемой. Затем удаляет 6 функций (`DROP FUNCTION IF EXISTS` по точным сигнатурам) и `api_login`, снимает права `api_exec` и `owner` на схему и таблицы, удаляет обе роли и проверяет, что ничего не осталось. Скрипт можно запускать повторно и когда внедрения не было. `USAGE` у `katona_dashboard_read`, `audit_dashboard_summary` и все прочие права не затрагиваются.
 
-### 3.2. Helper: период в `Europe/Moscow`
-
-```sql
-CREATE FUNCTION katona.dashboard_granicy(p_s date, p_po date)
-RETURNS TABLE (nachalo timestamptz, konec timestamptz)
-LANGUAGE plpgsql STABLE
-SET search_path = pg_catalog, pg_temp
-AS $$
-DECLARE
-    v_segodnya date := (now() AT TIME ZONE 'Europe/Moscow')::date;
-BEGIN
-    IF p_s IS NULL OR p_po IS NULL OR p_s > p_po THEN
-        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'dashboard_period_invalid';
-    END IF;
-    IF p_po - p_s > 365 THEN
-        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'dashboard_period_too_long';
-    END IF;
-    IF p_s > v_segodnya THEN
-        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'dashboard_period_in_future';
-    END IF;
-    nachalo := p_s::timestamp AT TIME ZONE 'Europe/Moscow';
-    konec   := (p_po + 1)::timestamp AT TIME ZONE 'Europe/Moscow';
-    RETURN NEXT;
-END
-$$;
-```
-
-Даты включительные в MSK → полуинтервал `[p_s 00:00 MSK, (p_po + 1) 00:00 MSK)`. Максимум 366 дней.
-
-### 3.3. Helper: единая когорта
+### 3.4. Проверка после внедрения (только SELECT)
 
 ```sql
-CREATE FUNCTION katona.dashboard_kogorta(p_nachalo timestamptz, p_konec timestamptz)
-RETURNS TABLE (dialog_id      uuid,
-               vremya_nachala timestamptz,
-               kanal          text,
-               etap           text,
-               status         text,
-               rezultat       text,
-               cel            boolean,
-               poterya        boolean,
-               isklyuchen     boolean)
-LANGUAGE sql STABLE
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT d.id,
-           d.vremya_nachala,
-           ik.kanal,
-           d.etap,
-           d.status,
-           d.rezultat::text,
-           EXISTS (SELECT 1
-                     FROM katona.celevye_sobytiya ce
-                    WHERE ce.dialog_id = d.id
-                      AND ce.kod_celi::text = 'ostavit_zayavku'
-                      AND ce.podtverzhdeno = true),
-           (d.status = 'zavershen' AND d.rezultat::text = 'net_otveta'),
-           (COALESCE(p.testovyy, false) OR COALESCE(p.sluzhebnyy, false))
-      FROM katona.dialogi d
-      LEFT JOIN katona.identifikatory_kanalov ik ON ik.id = d.identifikator_kanala_id
-      LEFT JOIN katona.polzovateli p           ON p.id  = d.polzovatel_id
-     WHERE d.vremya_nachala >= p_nachalo
-       AND d.vremya_nachala <  p_konec
-$$;
-```
-
-- Одна строка на `dialogi.id`: оба `LEFT JOIN` идут по первичным ключам, цель — через `EXISTS`, поэтому несколько целевых событий строк не размножают. Во всех агрегатах дополнительно `count(DISTINCT dialog_id)`.
-- `LEFT JOIN`: диалог без канала или пользователя не теряется из когорты (канал `NULL`, не исключён).
-- Цель — только `ostavit_zayavku` и `podtverzhdeno=true`. Потеря — `zavershen` и `net_otveta`. Диалог с целью и потерей учитывается в обоих KPI и в счётчике аномалии.
-- Исключаются диалоги пользователей с `testovyy=true` или `sluzhebnyy=true`. Ограничения этого правила — §5.
-
-### 3.4. Функции API
-
-```sql
-CREATE FUNCTION katona.dashboard_obzor(p_s date, p_po date)
-RETURNS TABLE (novye_obrashcheniya     bigint,
-               dostigli_celi           bigint,
-               konversiya_pct          numeric,
-               poteryany               bigint,
-               anomaliya_cel_i_poterya bigint,
-               isklyucheno_testovyh    bigint,
-               data_as_of              timestamptz)
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen),
-           count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen AND k.cel),
-           CASE WHEN count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen) = 0 THEN NULL
-                ELSE round(100.0 * count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen AND k.cel)
-                                 / count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen), 1)
-           END,
-           count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen AND k.poterya),
-           count(DISTINCT k.dialog_id) FILTER (WHERE NOT k.isklyuchen AND k.cel AND k.poterya),
-           count(DISTINCT k.dialog_id) FILTER (WHERE k.isklyuchen),
-           now()
-      FROM katona.dashboard_granicy(p_s, p_po) g
-     CROSS JOIN LATERAL katona.dashboard_kogorta(g.nachalo, g.konec) k
-$$;
-
-CREATE FUNCTION katona.dashboard_dinamika(p_s date, p_po date)
-RETURNS TABLE (den date, novye_obrashcheniya bigint, dostigli_celi bigint)
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-    WITH g AS (
-        SELECT * FROM katona.dashboard_granicy(p_s, p_po)
-    ), k AS (
-        SELECT (kk.vremya_nachala AT TIME ZONE 'Europe/Moscow')::date AS den,
-               kk.dialog_id,
-               kk.cel
-          FROM g
-         CROSS JOIN LATERAL katona.dashboard_kogorta(g.nachalo, g.konec) kk
-         WHERE NOT kk.isklyuchen
-    )
-    SELECT dni.d::date,
-           count(DISTINCT k.dialog_id),
-           count(DISTINCT k.dialog_id) FILTER (WHERE k.cel)
-      FROM g
-     CROSS JOIN generate_series(p_s::timestamp, p_po::timestamp, interval '1 day') AS dni(d)
-      LEFT JOIN k ON k.den = dni.d::date
-     GROUP BY dni.d
-     ORDER BY dni.d
-$$;
-
-CREATE FUNCTION katona.dashboard_etapy(p_s date, p_po date)
-RETURNS TABLE (etap text, dialogov bigint)
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT k.etap, count(DISTINCT k.dialog_id)
-      FROM katona.dashboard_granicy(p_s, p_po) g
-     CROSS JOIN LATERAL katona.dashboard_kogorta(g.nachalo, g.konec) k
-     WHERE NOT k.isklyuchen
-     GROUP BY k.etap
-     ORDER BY 2 DESC, 1
-$$;
-
-CREATE FUNCTION katona.dashboard_poslednie(p_s            date,
-                                           p_po           date,
-                                           p_limit        integer     DEFAULT 11,
-                                           p_status       text        DEFAULT NULL,
-                                           p_posle_vremya timestamptz DEFAULT NULL,
-                                           p_posle_id     uuid        DEFAULT NULL)
-RETURNS TABLE (dialog_id      uuid,
-               vremya_nachala timestamptz,
-               kanal          text,
-               etap           text,
-               status         text,
-               rezultat       text,
-               cel_dostignuta boolean,
-               anomaliya      boolean)
-LANGUAGE sql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, pg_temp
-AS $$
-    SELECT k.dialog_id, k.vremya_nachala, k.kanal, k.etap, k.status, k.rezultat,
-           k.cel, (k.cel AND k.poterya)
-      FROM katona.dashboard_granicy(p_s, p_po) g
-     CROSS JOIN LATERAL katona.dashboard_kogorta(g.nachalo, g.konec) k
-     WHERE NOT k.isklyuchen
-       AND (p_status IS NULL OR k.status = p_status)
-       AND (p_posle_vremya IS NULL
-            OR (k.vremya_nachala, k.dialog_id) < (p_posle_vremya, p_posle_id))
-     ORDER BY k.vremya_nachala DESC, k.dialog_id DESC
-     LIMIT LEAST(GREATEST(COALESCE(p_limit, 11), 1), 21)
-$$;
-```
-
-- Последние обращения сортируются по `vremya_nachala DESC, id DESC` — порядок стабилен.
-- Сервер запрашивает `limit + 1` строк (до 21), чтобы узнать, есть ли следующая страница; клиенту отдаёт не больше 20. SQL ограничивает `LIMIT` диапазоном 1–21 даже при ошибке сервера.
-- Значение `p_status` проверяет сервер по списку из §1; неизвестный статус в SQL просто даёт пустую выборку.
-- Курсор: `p_posle_vremya` и `p_posle_id` передаются только вместе.
-- `dialog_id` возвращается только серверу для курсора; в ответ API он не попадает (§4).
-
-### 3.5. Владелец, отзыв лишних прав, выдача EXECUTE
-
-```sql
--- ALTER ... OWNER требует: у исполнителя — права SET ROLE на новую роль-владельца,
--- у роли-владельца — CREATE на схеме. Оба права временные и отзываются ниже в этой же транзакции.
-GRANT katona_dashboard_owner TO CURRENT_USER;
-GRANT CREATE ON SCHEMA katona TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_granicy(date, date)                 OWNER TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_kogorta(timestamptz, timestamptz)   OWNER TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_obzor(date, date)                   OWNER TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_dinamika(date, date)                OWNER TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_etapy(date, date)                   OWNER TO katona_dashboard_owner;
-ALTER FUNCTION katona.dashboard_poslednie(date, date, integer, text, timestamptz, uuid)
-                                                                     OWNER TO katona_dashboard_owner;
-REVOKE CREATE ON SCHEMA katona FROM katona_dashboard_owner;
-
-REVOKE ALL ON FUNCTION
-    katona.dashboard_granicy(date, date),
-    katona.dashboard_kogorta(timestamptz, timestamptz),
-    katona.dashboard_obzor(date, date),
-    katona.dashboard_dinamika(date, date),
-    katona.dashboard_etapy(date, date),
-    katona.dashboard_poslednie(date, date, integer, text, timestamptz, uuid)
-  FROM PUBLIC;
-
-GRANT USAGE ON SCHEMA katona TO katona_dashboard_read;
-GRANT EXECUTE ON FUNCTION
-    katona.dashboard_obzor(date, date),
-    katona.dashboard_dinamika(date, date),
-    katona.dashboard_etapy(date, date),
-    katona.dashboard_poslednie(date, date, integer, text, timestamptz, uuid)
-  TO katona_dashboard_read;
-
--- Отозвать EXECUTE, выданный конкретным ролям через default privileges
--- (в Supabase это бывают anon, authenticated, service_role).
-DO $$
-DECLARE
-    r record;
-BEGIN
-    FOR r IN
-        SELECT p.oid::regprocedure AS fn, a.grantee
-          FROM pg_proc p
-         CROSS JOIN LATERAL aclexplode(p.proacl) a
-         WHERE p.pronamespace = 'katona'::regnamespace
-           AND p.proname LIKE 'dashboard\_%'
-           AND a.grantee <> 0
-           AND a.grantee NOT IN ('katona_dashboard_owner'::regrole, 'katona_dashboard_read'::regrole)
-    LOOP
-        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I', r.fn, pg_get_userbyid(r.grantee));
-    END LOOP;
-END
-$$;
-
-REVOKE katona_dashboard_owner FROM CURRENT_USER;
-```
-
-`REVOKE … FROM PUBLIC` не отзывает права, выданные конкретным ролям через default privileges, поэтому их снимает цикл выше. Затем §3.6 заканчивается проверкой ACL: если у новой функции всё-таки есть EXECUTE у кого-то, кроме владельца и `katona_dashboard_read`, транзакция прерывается целиком.
-
-`audit_dashboard_summary` остаётся у `katona_dashboard_read` и дашбордом не используется.
-
-### 3.6. LOGIN-роль сервера дашборда и встроенная проверка
-
-```sql
-CREATE ROLE katona_dashboard_api_login LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
-    NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5
-    IN ROLE katona_dashboard_read;
-ALTER ROLE katona_dashboard_api_login SET default_transaction_read_only = on;
-ALTER ROLE katona_dashboard_api_login SET statement_timeout = '5s';
-ALTER ROLE katona_dashboard_api_login SET idle_in_transaction_session_timeout = '15s';
-ALTER ROLE katona_dashboard_api_login SET search_path = pg_catalog;
-
-DO $$
-DECLARE
-    v_owner oid := 'katona_dashboard_owner'::regrole;
-    v_read  oid := 'katona_dashboard_read'::regrole;
-    v_api   oid := 'katona_dashboard_api_login'::regrole;
-    v_bad   bigint;
-BEGIN
-    -- 6 функций, владелец — katona_dashboard_owner, search_path зафиксирован
-    SELECT count(*) INTO v_bad
-      FROM pg_proc p
-     WHERE p.pronamespace = 'katona'::regnamespace
-       AND p.proname LIKE 'dashboard\_%'
-       AND p.proowner = v_owner
-       AND p.proconfig @> ARRAY['search_path=pg_catalog, pg_temp'];
-    IF v_bad <> 6 THEN
-        RAISE EXCEPTION 'dashboard_check_functions: % of 6', v_bad;
-    END IF;
-
-    -- SECURITY DEFINER ровно у 4 функций API
-    SELECT count(*) INTO v_bad
-      FROM pg_proc p
-     WHERE p.pronamespace = 'katona'::regnamespace
-       AND p.proname LIKE 'dashboard\_%'
-       AND p.prosecdef <> (p.proname IN ('dashboard_obzor', 'dashboard_dinamika',
-                                         'dashboard_etapy', 'dashboard_poslednie'));
-    IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'dashboard_check_secdef: %', v_bad;
-    END IF;
-
-    -- EXECUTE только у владельца и katona_dashboard_read (и не у PUBLIC)
-    SELECT count(*) INTO v_bad
-      FROM pg_proc p
-     CROSS JOIN LATERAL aclexplode(p.proacl) a
-     WHERE p.pronamespace = 'katona'::regnamespace
-       AND p.proname LIKE 'dashboard\_%'
-       AND a.grantee NOT IN (v_owner, v_read);
-    IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'dashboard_check_execute: % extra grants', v_bad;
-    END IF;
-
-    -- helpers недоступны katona_dashboard_read
-    IF has_function_privilege(v_read, 'katona.dashboard_kogorta(timestamptz, timestamptz)', 'EXECUTE')
-       OR has_function_privilege(v_read, 'katona.dashboard_granicy(date, date)', 'EXECUTE') THEN
-        RAISE EXCEPTION 'dashboard_check_helpers';
-    END IF;
-
-    -- LOGIN-роль: ни одного права SELECT на объекты katona, ни прав на таблицы владельцу сверх §3.1
-    SELECT count(*) INTO v_bad
-      FROM pg_class c
-     WHERE c.relnamespace = 'katona'::regnamespace
-       AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-       AND has_table_privilege(v_api, c.oid, 'SELECT');
-    IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'dashboard_check_api_tables: %', v_bad;
-    END IF;
-
-    SELECT count(*) INTO v_bad
-      FROM pg_class c
-     WHERE c.relnamespace = 'katona'::regnamespace
-       AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-       AND has_table_privilege(v_owner, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE');
-    IF v_bad <> 0 THEN
-        RAISE EXCEPTION 'dashboard_check_owner_tables: %', v_bad;
-    END IF;
-
-    -- владелец читает ровно 15 столбцов из §3.1 и ни одного другого
-    SELECT count(*) INTO v_bad
-      FROM pg_attribute a
-      JOIN pg_class c ON c.oid = a.attrelid
-     WHERE c.relnamespace = 'katona'::regnamespace
-       AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-       AND a.attnum > 0 AND NOT a.attisdropped
-       AND has_column_privilege(v_owner, c.oid, a.attnum, 'SELECT');
-    IF v_bad <> 15 THEN
-        RAISE EXCEPTION 'dashboard_check_owner_columns: % of 15', v_bad;
-    END IF;
-
-    IF has_schema_privilege(v_owner, 'katona', 'CREATE') THEN
-        RAISE EXCEPTION 'dashboard_check_owner_create';
-    END IF;
-
-    -- в роль-владельца не входит никто, кроме исполнителя скрипта
-    -- (PostgreSQL 16 сам оставляет создателю роли ADMIN OPTION без SET/INHERIT)
-    IF EXISTS (SELECT 1 FROM pg_auth_members m
-                WHERE m.roleid = v_owner
-                  AND m.member <> (SELECT oid FROM pg_roles WHERE rolname = current_user)) THEN
-        RAISE EXCEPTION 'dashboard_check_owner_members';
-    END IF;
-
-    -- LOGIN-роль входит только в katona_dashboard_read
-    IF (SELECT array_agg(m.roleid) FROM pg_auth_members m WHERE m.member = v_api) <> ARRAY[v_read] THEN
-        RAISE EXCEPTION 'dashboard_check_api_membership';
-    END IF;
-END
-$$;
-
-COMMIT;
-```
-
-- **Пароль** пользователь задаёт после внедрения через `psql` командой `\password katona_dashboard_api_login`: пароль хэшируется на клиенте и не попадает в журнал запросов. `ALTER ROLE … PASSWORD '…'` в SQL Editor использовать не рекомендуется — открытый текст может оказаться в логах. Пароль хранится только в секретах сервера дашборда; в GitHub, n8n и браузер он не попадает.
-- **Граница безопасности — права, а не `default_transaction_read_only`.** Сессия может сама выключить этот параметр, поэтому он лишь страхует от случайной записи. Писать роль не может потому, что у неё нет прав ни на одну таблицу, а DEFINER-функции только читают.
-- `katona_n8n_*`, `katona_dashboard_admin`, `postgres`, `service_role`, `anon`/`authenticated` и PostgREST дашборд не использует.
-
-### 3.7. Проверка после внедрения (только SELECT)
-
-```sql
-SELECT p.proname,
-       pg_get_userbyid(p.proowner) AS owner,
+SELECT p.proname::text AS funkciya,
+       pg_get_userbyid(p.proowner)::text AS owner,
        p.prosecdef AS security_definer,
        array_to_string(p.proconfig, '; ') AS config,
        has_function_privilege('katona_dashboard_api_login', p.oid, 'EXECUTE') AS api_login,
+       has_function_privilege('katona_dashboard_read', p.oid, 'EXECUTE') AS dashboard_read,
        (SELECT count(*) FROM pg_roles r
-         WHERE r.rolname IN ('anon', 'authenticated', 'service_role', 'katona_bot', 'katona_service')
-           AND has_function_privilege(r.oid, p.oid, 'EXECUTE')) AS lishnie_prava,
-       (SELECT count(*) FROM pg_class c
-         WHERE c.relnamespace = 'katona'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-           AND has_table_privilege('katona_dashboard_api_login', c.oid, 'SELECT')) AS api_login_tablic
+         WHERE r.rolname IN ('anon', 'authenticated', 'service_role', 'katona_bot', 'katona_service',
+                             'katona_dashboard_admin', 'katona_n8n_bot_login', 'katona_n8n_service_login')
+           AND has_function_privilege(r.oid, p.oid, 'EXECUTE')) AS lishnie_prava
   FROM pg_proc p
  WHERE p.pronamespace = 'katona'::regnamespace AND p.proname LIKE 'dashboard\_%'
- ORDER BY p.proname;
+UNION ALL
+SELECT 'audit_dashboard_summary', NULL, NULL, NULL,
+       has_function_privilege('katona_dashboard_api_login', 'katona.audit_dashboard_summary()', 'EXECUTE'),
+       has_function_privilege('katona_dashboard_read', 'katona.audit_dashboard_summary()', 'EXECUTE'),
+       NULL
+ ORDER BY 1;
 ```
 
-Ожидаем: владелец `katona_dashboard_owner`; `security_definer=true` у 4 функций API и `false` у двух helpers; `config = search_path=pg_catalog, pg_temp`; `api_login=true` только у 4 функций API; `lishnie_prava=0`; `api_login_tablic=0`. Затем сверить KPI из `dashboard_obzor` с ручным агрегатным SELECT руководителя за тот же период.
+Ожидаем:
 
-### 3.8. Откат
+| Функции | `api_login` | `dashboard_read` | Прочее |
+|---|---|---|---|
+| 4 функции API | `true` | `false` | `security_definer=true` |
+| 2 helpers | `false` | `false` | `security_definer=false` |
+| `audit_dashboard_summary` | `false` | `true` — как до внедрения | — |
+
+У всех шести функций `owner = katona_dashboard_owner`, `config = search_path=pg_catalog, pg_temp`, `lishnie_prava = 0`. Затем — сверить KPI из `dashboard_obzor` с ручным агрегатным SELECT руководителя за тот же период.
+
+### 3.5. Дополнительный read-only запрос: содержимое default privileges
+
+Число `default_acl_funkciy = 2` не говорит, **кому** и **что** выдают эти записи. Внедрение от них не зависит: скрипт снимает с новых функций любые лишние права и проверяет ACL. Но для ревью их можно раскрыть запросом ниже — **только по решению руководителя проекта**:
 
 ```sql
-BEGIN;
--- Удалить функции может их владелец или владелец схемы katona. Если исполнитель не владеет
--- схемой и не суперпользователь, ему нужны права роли-владельца; для остальных строка безвредна.
--- Членство пропадает вместе с ролью при DROP ROLE.
-GRANT katona_dashboard_owner TO CURRENT_USER;
-DROP FUNCTION IF EXISTS
-    katona.dashboard_poslednie(date, date, integer, text, timestamptz, uuid),
-    katona.dashboard_etapy(date, date),
-    katona.dashboard_dinamika(date, date),
-    katona.dashboard_obzor(date, date),
-    katona.dashboard_kogorta(timestamptz, timestamptz),
-    katona.dashboard_granicy(date, date);
-DROP ROLE IF EXISTS katona_dashboard_api_login;
-REVOKE ALL ON katona.dialogi, katona.identifikatory_kanalov,
-              katona.celevye_sobytiya, katona.polzovateli
-  FROM katona_dashboard_owner;
-REVOKE ALL ON SCHEMA katona FROM katona_dashboard_owner;
-DROP ROLE IF EXISTS katona_dashboard_owner;
--- Только если в §3.0 было read_usage_do = false:
--- REVOKE USAGE ON SCHEMA katona FROM katona_dashboard_read;
-COMMIT;
+SELECT pg_get_userbyid(d.defaclrole)::text AS dlya_obektov_roli,
+       CASE WHEN d.defaclnamespace = 0 THEN '<все схемы>'
+            ELSE d.defaclnamespace::regnamespace::text END AS shema,
+       CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee)::text END AS komu,
+       a.privilege_type,
+       a.is_grantable
+  FROM pg_default_acl d
+ CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+ WHERE d.defaclobjtype = 'f'
+ ORDER BY 1, 2, 3;
 ```
 
-`REVOKE ALL ON <таблица>` снимает и права по столбцам. Откат не затрагивает n8n, `katona_bot`, `katona_service`, 9 разрешений `kb_v2_*` и `audit_dashboard_summary`.
+У записи «<все схемы>» список **заменяет** встроенные права по умолчанию: если в нём нет `PUBLIC`, значит у `PUBLIC` EXECUTE отобран. У записи для конкретной схемы права **добавляются** к встроенным.
+
+### 3.6. Пароль LOGIN-роли
+
+После внедрения пользователь задаёт пароль через `psql` командой `\password katona_dashboard_api_login`: пароль хэшируется на клиенте и не попадает в журнал запросов. `ALTER ROLE … PASSWORD '…'` в SQL Editor использовать не рекомендуется — открытый текст может оказаться в логах. Пароль хранится только в секретах сервера дашборда; в GitHub, n8n и браузер он не попадает.
+
+**Граница безопасности — права, а не `default_transaction_read_only`.** Сессия может сама выключить этот параметр, поэтому он лишь страхует от случайной записи. Писать роль не может потому, что у неё нет прав ни на одну таблицу, а DEFINER-функции только читают.
 
 ## 4. Контракт серверного API
 
@@ -600,36 +283,43 @@ interface DialogsResponse {
 
 Для уже существующих 3 тестовых диалогов в любом варианте нужна адресная правка данных — только по отдельному разрешению пользователя.
 
-## 6. Открытые вопросы до внедрения (D1-02)
 
-1. Роль, от имени которой пользователь выполнит SQL, и версия PostgreSQL Supabase (§3.0). Локальная проверка шла на PostgreSQL 16 под суперпользователем (§7).
-2. Сетевой путь сервера дашборда к PostgreSQL (SSH-туннель или приватная сеть) и ограничение входа роли в `pg_hba` по адресу сервера.
-3. Механизм входа руководителя и хранение сессий (кто руководитель, сколько пользователей).
-4. Механизм классификации тестовых и служебных обращений (§5): решение руководителя и разрешение пользователя.
-5. Индексы: после внедрения на реальном объёме — `EXPLAIN` для `dialogi(vremya_nachala)` и `celevye_sobytiya(dialog_id)`. Новые индексы — только по результатам и с согласия пользователя.
-6. Индикатор «Ожидают менеджера» в контракт не включён. Статус `peredan_cheloveku` есть, но он не отличает «запрошено» от «взято менеджером»; по `02_UX_AND_FILTERS.md` индикатор скрывается.
+## 6. Оставшиеся риски и вопросы до внедрения
 
-## 7. Проверка во временном локальном PostgreSQL
+1. **Ограничения самой Supabase, которых нет в локальной проверке:** расширение `supautils` (может запрещать операции с ролями), event triggers и фактическое содержимое двух записей default privileges. Скрипт от них не зависит: лишние EXECUTE снимаются и проверяются, при любом запрете транзакция откатится целиком. Но успешность внедрения в Supabase подтверждается только самим внедрением. Содержимое default privileges можно раскрыть запросом §3.5 по решению руководителя.
+2. **Владение схемой:** внедрение требует, чтобы `postgres` владел `katona` и четырьмя таблицами. Это ожидается по SQL №3, но фактически не проверялось; при ином владельце скрипт остановится на `dashboard_pre_ownership` без изменений.
+3. **Сетевой путь** сервера дашборда к PostgreSQL (SSH-туннель или приватная сеть) и ограничение входа роли в `pg_hba` по адресу сервера.
+4. **Авторизация руководителя** (механизм входа, сессии, кто руководитель) — обязательна до рабочего запуска, в этом задании не внедряется.
+5. **Классификация тестовых и служебных обращений** (§5) — обязательна до рабочего запуска, в этом задании не внедряется.
+6. **Производительность:** `EXPLAIN` на реальном объёме для `dialogi(vremya_nachala)` и `celevye_sobytiya(dialog_id)`; новые индексы — только по результатам и с согласия пользователя.
+7. Индикатор «Ожидают менеджера» в контракт не включён: `peredan_cheloveku` не отличает «запрошено» от «взято менеджером»; по `02_UX_AND_FILTERS.md` индикатор скрывается.
 
-**Среда.** PostgreSQL 16.2 — временный кластер на `127.0.0.1` во временной папке исполнителя, удаляется после проверки; к Supabase не подключался. SQL взят **дословно** из §3.0–§3.8 этого документа.
+## 7. Проверка во временном локальном PostgreSQL 17.6
 
-**Заглушка схемы.** Таблицы `katona.dialogi`, `identifikatory_kanalov`, `celevye_sobytiya`, `polzovateli` с подтверждёнными столбцами и CHECK статусов. Добавлены «приманки» ПД, которые должны оставаться недоступными: `polzovateli.imya`/`telefon`, `identifikatory_kanalov.vneshniy_id`, `dialogi.rezyume`, `celevye_sobytiya.dannye`, `zayavki.telefon`. Также созданы роли `anon`, `authenticated`, `service_role` с `USAGE` на схему и default privileges `EXECUTE` на функции, как бывает в Supabase. Тестовые данные: границы суток MSK с точностью до секунды, дубли целевого события, неподтверждённая цель, другой код цели, аномалия «цель + потеря», тестовый и служебный пользователи, диалог без пользователя и канала, два канала, 25 диалогов для проверки `LIMIT`.
+**Среда.** PostgreSQL **17.6** — та же версия, что в Supabase. Временный кластер на `127.0.0.1` во временной папке исполнителя, удаляется после проверки; к Supabase не подключался.
 
-**Результат: 55 проверок из 55 пройдены.**
+- **Суперпользователь кластера** — отдельная роль `supabase_admin`. `postgres` — **NOSUPERUSER** с `CREATEROLE`, владелец базы, схемы `katona` и таблиц, как в Supabase.
+- **Файлы** `sql/dashboard_deploy.sql` и `sql/dashboard_rollback.sql` выполнялись **как есть**: одной командой, как в SQL Editor, и через `psql -v ON_ERROR_STOP=1 -f`.
+- **Заглушка** содержит подтверждённые столбцы и CHECK статусов, столбцы-«приманки» ПД (`imya`, `telefon`, `vneshniy_id`, `rezyume`, `dannye`, `zayavki.telefon`), а также существующие объекты:
+  - роли `katona_dashboard_read` (с `USAGE` и `audit_dashboard_summary()`), `katona_dashboard_admin` (3 функции), `katona_bot`/`katona_service` и n8n-логины;
+  - прямое разрешение `kb_v2_*` у служебного логина;
+  - `anon`, `authenticated`, `service_role`, созданные суперпользователем;
+  - две записи default privileges для функций.
+- **Снимок** всех существовавших ACL функций, таблиц, столбцов и схемы, членств, атрибутов и параметров ролей и default privileges сравнивался до внедрения, после него и после отката.
+
+**Результат: 137 проверок из 137 пройдены.**
 
 | Сценарий | Что проверено |
 |---|---|
-| S1. Внедрение суперпользователем при default privileges для `anon`/`authenticated`/`service_role` | Транзакция проходит; запрос §3.7 даёт ожидаемые 6 строк. KPI: 6 обращений, 2 цели, 33,3 %, 2 потерянных, аномалия 1, исключено 2 — совпадают с ручным расчётом. Те же цифры при `TimeZone` сессии `Pacific/Kiritimati` и `America/Los_Angeles`. Динамика по дням MSK с нулевыми днями и секундными границами; сумма равна KPI. Распределение этапов. Постраничный вывод без пропусков и повторов; канал через `identifikatory_kanalov` (`telegram`, `sayt`, `NULL`). Фильтр статуса; `LIMIT` 1–21, по умолчанию 11. Пустой период → нули и конверсия `NULL`. Ошибки периода с SQLSTATE `22023`, период 366 дней принимается |
-| S1. Права | LOGIN-роль: helpers, все 4 таблицы, `INSERT` (и после `SET default_transaction_read_only = off`) и `CREATE` в схеме — отказ. NOLOGIN-роли `katona_dashboard_owner` и `katona_dashboard_read` войти не могут. Владелец не читает ни один столбец-приманку ПД, но читает `identifikatory_kanalov.kanal`. `anon`, `authenticated`, `service_role`, `katona_bot`, `katona_service` не могут вызвать функции дашборда, несмотря на default privileges |
-| S1. Откат и повторное внедрение | §3.8 удаляет обе роли и все 6 функций; право на `audit_dashboard_summary` сохраняется; повторное внедрение после отката проходит |
-| S2. Испорченное внедрение | Лишний `GRANT SELECT (imya)` перед проверкой → встроенная проверка `dashboard_check_owner_columns` прерывает транзакцию; не остаётся ни ролей, ни функций |
-| S3. Внедрение ролью без суперпользователя (`CREATEROLE`, владелец схемы и таблиц — как `postgres` в Supabase) | Внедрение, §3.7, KPI и откат проходят. После внедрения у исполнителя остаётся только автоматический ADMIN OPTION PostgreSQL 16 на созданные роли, без `SET`/`INHERIT`; других участников у роли-владельца нет |
+| T1. `postgres` без суперпользователя; default privileges: EXECUTE для `anon`/`authenticated`/`service_role` на схему + глобальный отзыв у `PUBLIC`; запуск одной командой | **Внедрение:** создаются 3 роли и 6 функций; существующие права, членства и параметры **не изменились**; запросы §3.4 и §3.5 дают ожидаемое. **KPI:** 6 / 2 / 33,3 % / 2, аномалия 1, исключено 2; не зависят от `TimeZone` сессии. **Виджеты:** динамика по дням MSK с нулевыми днями и секундными границами, распределение этапов, постраничный вывод, канал через `identifikatory_kanalov`, фильтр статуса, `LIMIT` 1–21, пустой период, ошибки периода `22023`. **Изоляция** — следующая строка. **Откат:** состояние каталога **идентично** исходному; повторный откат ничего не меняет; повторное внедрение и откат проходят |
+| T1. Изоляция LOGIN (не суперпользователь) | Выполняет **ровно 4** функции в `katona`. **Отказ:** `audit_dashboard_summary()`, оба helper, функции admin (`otozvat_dokument_znaniy`, `razblokirovat_polzovatelya`), n8n (`zaregistrirovat_vhod_klienta`), `kb_v2_*`, все 5 таблиц, `INSERT` (в том числе после `SET default_transaction_read_only = off`), `CREATE` в схеме, `SET ROLE` в owner и в `katona_dashboard_read`. **Прочие роли:** NOLOGIN owner и api_exec войти не могут; owner не читает ни одного столбца ПД. У `PUBLIC`, `anon`, `authenticated`, `service_role`, `katona_dashboard_read`, `katona_dashboard_admin`, `katona_bot`, `katona_service`, обоих n8n-логинов и самого `postgres` нет EXECUTE на функции дашборда. У `postgres` остаётся только автоматический ADMIN OPTION на новые роли, без SET/INHERIT |
+| T2. Default privileges с глобальной выдачей EXECUTE в том числе существующей `katona_dashboard_read`; `createrole_self_grant = 'set, inherit'`; запуск через `psql -f` | Все проверки T1 повторены и пройдены: лишние EXECUTE (включая `katona_dashboard_read`) сняты только с новых функций, самовыдача членства снята, откат восстанавливает исходное состояние |
+| T3. Испорченное внедрение (лишний `GRANT SELECT (imya)`) | Прервано `dashboard_check_owner_columns`; ничего не осталось, состояние не изменилось |
+| T4. Роль `katona_dashboard_api_exec` уже существует | Остановлено `dashboard_pre_roles_exist`; существующая роль не тронута |
+| T5. Нет столбца `polzovateli.sluzhebnyy` | Остановлено `dashboard_pre_columns` с именем столбца; ничего не создано |
+| T6. Откат без внедрения | Проходит, ничего не меняет |
+| T7. `postgres` не владеет схемой и таблицами | Остановлено `dashboard_pre_ownership`; ничего не создано |
 
-**Не проверено — не считать подтверждённым до внедрения:**
+**Найдено и исправлено проверкой:** первая версия отката снимала права владельца через `REVOKE ALL ON <таблица>`. Права при этом не менялись, но неявный ACL таблиц (`NULL`) превращался в явный, то есть каталог отличался от исходного. Теперь откат снимает ровно выданные права по столбцам, и все сравниваемые данные каталога (ACL, членства, атрибуты и параметры ролей, default privileges) после отката совпадают с исходными.
 
-1. **Версия PostgreSQL Supabase.** Если это PostgreSQL 15, правила членства в ролях другие (нет опций `SET`/`INHERIT` у членства, иначе работает `CREATEROLE`). Скрипт написан без синтаксиса, специфичного для 16, но выполнение на 15 не проверялось.
-2. **Ограничения самой Supabase:** расширение `supautils` (запрет операций с «зарезервированными» ролями), event triggers, фактические default privileges и то, суперпользователь ли `postgres`. Это покажет §3.0.
-3. **Исполнитель, который не владеет схемой `katona` и не суперпользователь** — не моделировался.
-4. **Реальные типы `rezultat` и `kod_celi`** (в заглушке `text`); приведение `::text` покрывает `text`, `varchar` и enum, но на живой схеме не запускалось.
-5. **Производительность и `EXPLAIN`** на реальном объёме, сетевой путь, `pg_hba`, установка пароля через `\password`.
-6. **Серверный API** (§4), включая AEAD-курсор и авторизацию, не реализован и не тестировался — только контракт.
+**Готовность.** SQL проверен на той же версии PostgreSQL и с той же моделью прав исполнителя, что в Supabase. Не проверены только особенности самой платформы Supabase (§6, п. 1–2): при любом отказе скрипт откатывается целиком. Выполнение в рабочей Supabase — только после утверждения руководителем и разрешения пользователя (D1-02B).
