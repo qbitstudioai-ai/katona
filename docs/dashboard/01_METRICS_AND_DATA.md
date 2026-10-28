@@ -39,7 +39,7 @@
 
 | Сущность | Источник в схеме `katona` | Подтверждение |
 |---|---|---|
-| Диалоги | `dialogi`: `vremya_nachala`, `status`, `rezultat`; канал, текущий этап, владелец — столбцы уточнить | Таблица и логика создания — ✅; часть столбцов — ❓ |
+| Диалоги | `dialogi`: `id`, `vremya_nachala`, `status` (CHECK: `aktivnyy`, `ozhidaet_otveta`, `peredan_cheloveku`, `zavershen`), `rezultat`, `etap`, `polzovatel_id`; канал — `identifikator_kanala_id` → `identifikatory_kanalov.kanal`; владелец/менеджер — не подтверждён | ✅ (кроме владельца) |
 | Целевой результат | `celevye_sobytiya` (`kod_celi`) → `zayavki` | ✅ логика записи |
 | Этапы | `sobytiya_etapov` — только для подтверждённых исходящих действий | ⚠️ полнота по остальным маршрутам не доказана |
 | События диалога | `sobytiya_dialogov` | ✅ существует, назначение для метрик не описано |
