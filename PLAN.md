@@ -566,3 +566,11 @@
 - 🔄 Следующая проверка: `getWebhookInfo` **служебного** Telegram-бота через PowerShell, выводить только `webhook_ustanovlen`, `pending_update_count`, `last_error_date`, `last_error_message`, `allowed_updates` — без токена и полного URL webhook. Это различит сбой доставки Telegram/webhook от зависшей обработки n8n, но не докажет причину полностью.
 - ⬜ Если webhook работает и backlog отсутствует, диагностировать ранее зависшие service executions и SQL приём `katona.zaregistrirovat_sluzhebnoe_sobytie` (без повторных нажатий).
 - ⬜ Не менять `sreda=test` в служебном Workflow без отдельной миграции; там это предусмотрено локальной проверкой конфигурации.
+
+
+### 02.11.2026 — Telegram webhook timeout при кнопке Take
+- ✅ Пользователь выполнил служебный Telegram `getWebhookInfo`: webhook установлен, `pending_update_count=0`, `last_error_message=Read timeout expired`, последняя ошибка 02.11.2026 06:10:18 МСК (timestamp 1793589018). Пустой `allowed_updates` в выводе PowerShell сам по себе не свидетельствует о запрете `callback_query`.
+- ✅ Проверено в локальном служебном JSON: `Принять вход служебного бота` использует `responseMode=responseNode`; `Подтвердить служебный вход` вызывается после `Служебный_Сохранить служебный вход` (Postgres). Если регистрация в БД или приём webhook задерживаются, Telegram может не дождаться HTTP-ответа.
+- ✅ Ранее четыре приватных callback `callback_take` в 06:03 сохранены; групповые callback в приведённой выборке служебного канала отсутствуют. Сопутствующие Executions n8n были `Running` несколько минут.
+- 🔄 Следующая безопасная диагностика: посмотреть текущие активные/заблокированные SQL-сессии через `pg_stat_activity`, без SQL-текстов, PII и изменений базы; отдельно проверить статусы зависших служебных Executions по завершении.
+- ⬜ Установить, что именно вызвало Telegram timeout — ожидание Postgres, перегрузка/зависание n8n или сеть. Не переустанавливать webhook, не повторять callback и не перезапускать Executions до проверки.
